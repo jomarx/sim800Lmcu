@@ -13,7 +13,8 @@
   this example is in the public domain
  */
 #include <ArduinoHttpClient.h>
-#include <WiFi.h>
+#include <ESP8266WiFi.h>
+//#include <WiFi.h>
 
 #include <SoftwareSerial.h>
 
@@ -31,6 +32,21 @@ SoftwareSerial sim800(rxPin,txPin);
 
 String smsStatus,senderNumber,receivedDate,msg;
 boolean isReply = false;
+
+char serverAddress[] = "192.168.1.236";  // server address
+int port = 80;
+
+WiFiClient wifi;
+HttpClient client = HttpClient(wifi, serverAddress, port);
+int status = WL_IDLE_STATUS;
+String response;
+int statusCode = 0;
+
+String contentType = "application/x-www-form-urlencoded";
+String taskID = "";
+String smsMsg = "";
+String targetNum = "";
+String Status = "";
 
 void setup() {
 	pinMode(RELAY_1, OUTPUT); //Relay 1
@@ -53,6 +69,27 @@ void setup() {
 
 	sim800.print("AT+CMGF=1\r"); //SMS text mode
 	delay(1000);
+	
+	WiFi.mode(WIFI_STA);
+	
+	String wfms = WiFi.macAddress();
+	Serial.print("MAC address : ");
+	Serial.println(wfms);
+	
+	String newHostname = "smsBlast01"; //This changes the hostname of the ESP8266 to display neatly on the network esp on router.
+	WiFi.hostname(newHostname.c_str());
+	
+	wifiConnect();
+	
+	// print the SSID of the network you're attached to:
+	Serial.println();
+	Serial.print("SSID: ");
+	Serial.println(WiFi.SSID());
+
+	// print your WiFi shield's IP address:
+	IPAddress ip = WiFi.localIP();
+	Serial.print("IP Address: ");
+	Serial.println(ip);
 }
 
 void loop() {
@@ -65,6 +102,8 @@ void loop() {
 		sim800.println(Serial.readString());
 	}
 	//////////////////////////////////////////////////
+	
+	talkPHPget ();
 } //main loop ends
 
 //***************************************************
@@ -169,4 +208,176 @@ void Reply(String text){
 	sim800.write(0x1A); //ascii code for ctrl-26 //sim800.println((char)26); //ascii code for ctrl-26
 	delay(1000);
 	Serial.println("SMS Sent Successfully.");
+}
+
+void wifiConnect () {
+	// Connect to WPA/WPA2 network:
+	char ssid[] = "AP Guess"; // your SSID
+	char pass[] = "@pgu3$$1"; // your SSID Password
+
+	WiFi.begin(ssid, pass);
+	int ResetCounter = 0;
+	Serial.print("Attempting to connect to Network ");
+	while ( WiFi.status() != WL_CONNECTED) {
+		
+		Serial.print(".");
+		ResetCounter++;
+		delay(300);
+		
+		if (ResetCounter >= 120) {
+			Serial.print("ESP8266 reset!");			
+
+			ESP.restart();
+		}
+	}
+}
+
+void delayer(int dly){
+	Serial.print("Delaying : ");
+	for (int DelayDaw = 0; DelayDaw <= dly; DelayDaw++){
+		delay(1000);
+		yield();
+		Serial.print(DelayDaw);
+		Serial.print(".");
+	}
+}
+
+void talkPHPget (){
+	//get data from querytasks
+	int typer=2;
+	statusCode = 0;
+	response = "";
+	Serial.println("making POST request");
+	//String contentType = "application/x-www-form-urlencoded";
+	String postData = "taskType=";
+	postData += typer;
+
+	Serial.print("postData: ");
+	Serial.println(postData);
+
+	Serial.println();
+	Serial.println("Start sending loop");
+	
+	while ( statusCode != 200) {
+		
+		Serial.print("x");
+		//client.post("/android2/querytask.php", contentType, postData);
+		client.post("/itsystemsj/querytasks.php", contentType, postData);
+		// read the status code and body of the response
+		statusCode = client.responseStatusCode();
+		response = client.responseBody();
+		Serial.print("Status code: ");
+		Serial.println(statusCode);
+		//200 = data sent successfully
+		//-1 =
+		//Response is the data the PHP server sents back
+		Serial.print("Response: ");
+		Serial.println(response);
+		delay(100);
+		//disconnect client
+		client.stop();
+	}
+	//reset status code
+	statusCode = 0;
+	
+	if ((response != "")&&(typer == 2)) {
+	  
+		
+		Serial.println();
+		Serial.println("not empty, means task available!");
+
+		//crunch response to get data
+		int firstCommaIndex = response.indexOf(',');
+		int secondCommaIndex = response.indexOf(',', firstCommaIndex+1);
+		int thirdCommaIndex = response.indexOf(',', secondCommaIndex+1);
+		taskID = response.substring(0, firstCommaIndex);
+		smsMsg = response.substring(firstCommaIndex+1, secondCommaIndex);
+		targetNum = response.substring(secondCommaIndex+1, thirdCommaIndex);
+		
+		Serial.print("ID: ");
+		Serial.println(taskID);
+		Serial.print("smsMsg: ");
+		Serial.println(smsMsg);
+		Serial.print("targetNum: ");
+		Serial.println(targetNum);
+		Serial.println();
+		
+		client.stop();
+		
+		//send SMS
+		sendSMS();
+	
+	}
+}
+
+void sendSMS(){
+	sim800.print("AT+CMGF=1\r");
+	delay(1000);
+	sim800.print("AT+CMGS=\""+targetNum+"\"\r");
+	delay(1000);
+	sim800.println(smsMsg);
+	delay(100);
+	//sim800.println((char)26);// ASCII code of CTRL+Z
+	sim800.write(0x1A); //ascii code for ctrl-26 //sim800.println((char)26); //ascii code for ctrl-26
+	delay(1000);
+	Serial.println("SMS Sent Successfully.");
+	
+	typePhp(1); //mark SMS as done
+	
+	delayer(30);
+}
+
+void typePhp (int typer){
+	
+	statusCode = 0;
+	response = "";
+	Serial.println("making POST request");
+	//String contentType = "application/x-www-form-urlencoded";
+	String postData = "taskType=";
+	postData += typer;
+	
+	if ((typer==1)) {
+		Serial.println("Posting and updating data");
+		postData += "&val1=";
+		postData += taskID;
+	}
+
+	Serial.print("postData: ");
+	Serial.println(postData);
+
+	Serial.println();
+	Serial.println("Start sending loop");
+	
+	while ( statusCode != 200) {
+		
+		Serial.print(".");
+		//client.post("/android2/querytask.php", contentType, postData);
+		client.post("/itsystemsj/querytasks.php", contentType, postData);
+		// read the status code and body of the response
+		statusCode = client.responseStatusCode();
+		response = client.responseBody();
+		Serial.print("Status code: ");
+		Serial.println(statusCode);
+		//200 = data sent successfully
+		//-1 =
+		//Response is the data the PHP server sents back
+		Serial.print("Response: ");
+		Serial.println(response);
+		delay(100);
+		
+	}
+	//disconnect client
+		client.stop();
+		
+	//reset status code
+	statusCode = 0;
+	
+
+    if ((typer==1)) {
+		Serial.print("Update ");
+		Serial.print(typer);
+		Serial.print(" successful! ");
+		Serial.println();
+	}
+  
 }
