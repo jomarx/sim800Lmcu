@@ -27,8 +27,15 @@ const String PHONE = "+639175927640";
 #define txPin 0 //D3
 SoftwareSerial sim800(rxPin,txPin);
 
-#define RELAY_1 D0
-#define RELAY_2 D1
+#define RELAY_1 D1
+#define RELAY_2 D5
+#define SENDSMSSW D6
+
+//reset button values	
+int swState1 = 1;
+
+const int led = 16;
+int ledStatus = 0;
 
 String smsStatus,senderNumber,receivedDate,msg;
 boolean isReply = false;
@@ -45,12 +52,21 @@ int statusCode = 0;
 String contentType = "application/x-www-form-urlencoded";
 String taskID = "";
 String smsMsg = "";
+String getSmsMsg = "";
 String targetNum = "";
 String Status = "";
 
+String newHostname = "smsBlast01"; //This changes the hostname of the ESP8266 to display neatly on the network esp on router.
+
+int devCode = 1;
+
 void setup() {
+	
+	pinMode(led, OUTPUT);
 	pinMode(RELAY_1, OUTPUT); //Relay 1
 	pinMode(RELAY_2, OUTPUT); //Relay 2
+	
+	pinMode(SENDSMSSW, INPUT_PULLUP); //SENDING sms switch, pull down for off
 
 	//digitalWrite(RELAY_1, LOW);
 	//digitalWrite(RELAY_2, LOW);
@@ -76,7 +92,6 @@ void setup() {
 	Serial.print("MAC address : ");
 	Serial.println(wfms);
 	
-	String newHostname = "smsBlast01"; //This changes the hostname of the ESP8266 to display neatly on the network esp on router.
 	WiFi.hostname(newHostname.c_str());
 	
 	wifiConnect();
@@ -95,6 +110,7 @@ void setup() {
 void loop() {
 	//////////////////////////////////////////////////
 	while(sim800.available()){
+		Serial.print("Reading SIM800L :  ");
 		parseData(sim800.readString());
 	}
 	//////////////////////////////////////////////////
@@ -103,11 +119,19 @@ void loop() {
 	}
 	//////////////////////////////////////////////////
 	
-	talkPHPget ();
+	swState1 = digitalRead(SENDSMSSW);
+	delay(100);
+
+	if (swState1 == LOW){
+		//get data from PHP for message to send
+		talkPHPget ();
+	}
+		
 } //main loop ends
 
 //***************************************************
 void parseData(String buff){
+	blinkLED();
 	Serial.println(buff);
 
 	unsigned int len, index;
@@ -134,12 +158,12 @@ void parseData(String buff){
 			//get the message stored at memory location "temp"
 			sim800.println(temp); 
 
-			//must insert sms to db here, status 5
 		}
 		else if(cmd == "+CMGR"){
 			extractSms(buff);
 
 			if(senderNumber == PHONE){
+				Serial.println("doAction! :  ");
 				doAction();
 			}
 		}
@@ -171,6 +195,12 @@ void extractSms(String buff){
 	msg = buff;
 	buff = "";
 	msg.toLowerCase();
+	getSmsMsg = msg;
+	blinkLED();
+	
+	//save incoming sms to db
+	typePhp(3);
+	delSMS();
 }
 
 void doAction(){
@@ -195,6 +225,7 @@ void doAction(){
 	senderNumber="";
 	receivedDate="";
 	msg="";  
+	blinkLED();
 }
 
 void Reply(String text){
@@ -210,6 +241,16 @@ void Reply(String text){
 	Serial.println("SMS Sent Successfully.");
 }
 
+void delSMS(){
+	Serial.println();
+	sim800.print('AT+CMGDA="DEL READ"\r');
+	delayer(3);
+	Serial.println();
+	sim800.print('AT+CMGDA="DEL SENT"\r');
+	delayer(3);
+	Serial.println("SMS deleted Successfully.");
+}
+
 void wifiConnect () {
 	// Connect to WPA/WPA2 network:
 	char ssid[] = "AP Guess"; // your SSID
@@ -223,6 +264,7 @@ void wifiConnect () {
 		Serial.print(".");
 		ResetCounter++;
 		delay(300);
+		blinkLED();
 		
 		if (ResetCounter >= 120) {
 			Serial.print("ESP8266 reset!");			
@@ -239,15 +281,17 @@ void delayer(int dly){
 		yield();
 		Serial.print(DelayDaw);
 		Serial.print(".");
+		blinkLED();
 	}
 }
 
 void talkPHPget (){
 	//get data from querytasks
+	blinkLED();
 	int typer=2;
 	statusCode = 0;
 	response = "";
-	Serial.println("making POST request");
+	Serial.println("TPG: making POST request");
 	//String contentType = "application/x-www-form-urlencoded";
 	String postData = "taskType=";
 	postData += typer;
@@ -259,7 +303,7 @@ void talkPHPget (){
 	Serial.println("Start sending loop");
 	
 	while ( statusCode != 200) {
-		
+		blinkLED();
 		Serial.print("x");
 		//client.post("/android2/querytask.php", contentType, postData);
 		client.post("/itsystemsj/querytasks.php", contentType, postData);
@@ -282,7 +326,7 @@ void talkPHPget (){
 	
 	if ((response != "")&&(typer == 2)) {
 	  
-		
+		blinkLED();
 		Serial.println();
 		Serial.println("not empty, means task available!");
 
@@ -306,8 +350,13 @@ void talkPHPget (){
 		
 		//send SMS
 		sendSMS();
+		blinkLED();
+		
+		delayer(3);
 	
 	}
+	
+	
 }
 
 void sendSMS(){
@@ -322,16 +371,18 @@ void sendSMS(){
 	delay(1000);
 	Serial.println("SMS Sent Successfully.");
 	
+	delayer(5);
+	
 	typePhp(1); //mark SMS as done
 	
 	delayer(30);
 }
 
 void typePhp (int typer){
-	
+	blinkLED();
 	statusCode = 0;
 	response = "";
-	Serial.println("making POST request");
+	Serial.println("TP: making POST request");
 	//String contentType = "application/x-www-form-urlencoded";
 	String postData = "taskType=";
 	postData += typer;
@@ -341,12 +392,22 @@ void typePhp (int typer){
 		postData += "&val1=";
 		postData += taskID;
 	}
+	else if ((typer==3)) {
+		Serial.println("Posting and updating data");
+		postData += "&val1=";
+		postData += devCode;		
+		postData += "&val2="; //message
+		postData += getSmsMsg;		
+		postData += "&val3="; //src number
+		postData += senderNumber;
+	}
 
 	Serial.print("postData: ");
 	Serial.println(postData);
 
 	Serial.println();
 	Serial.println("Start sending loop");
+	blinkLED();
 	
 	while ( statusCode != 200) {
 		
@@ -364,6 +425,7 @@ void typePhp (int typer){
 		Serial.print("Response: ");
 		Serial.println(response);
 		delay(100);
+		blinkLED();
 		
 	}
 	//disconnect client
@@ -373,11 +435,28 @@ void typePhp (int typer){
 	statusCode = 0;
 	
 
-    if ((typer==1)) {
+    if ((typer==1)||(typer==3)) {
 		Serial.print("Update ");
 		Serial.print(typer);
 		Serial.print(" successful! ");
 		Serial.println();
+		blinkLED();
 	}
   
+}
+
+void blinkLED() {
+	//
+	if(ledStatus==0){
+		digitalWrite(led, HIGH);
+		ledStatus=1;
+		delay(50);
+	}
+	else if(ledStatus==1) {
+		//
+		digitalWrite(led, LOW);
+		ledStatus=0;
+		delay(50);
+	}
+
 }
