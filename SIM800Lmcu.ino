@@ -12,6 +12,11 @@
   
   this example is in the public domain
  */
+ 
+ //https://github.com/ahmadlogs/arduino-ide-examples/blob/main/nodemcu-sim800l-relay/nodemcu-sim800l-relay.ino
+ //https://www.robotics.org.za/SIM800L-V2
+ 
+ 
 #include <ArduinoHttpClient.h>
 #include <ESP8266WiFi.h>
 //#include <WiFi.h>
@@ -30,6 +35,7 @@ SoftwareSerial sim800(rxPin,txPin);
 #define RELAY_1 D1
 #define RELAY_2 D5
 #define SENDSMSSW D6
+#define SIM800LRST D7
 
 //reset button values	
 int swState1 = 1;
@@ -67,10 +73,15 @@ void setup() {
 	pinMode(RELAY_2, OUTPUT); //Relay 2
 	
 	pinMode(SENDSMSSW, INPUT_PULLUP); //SENDING sms switch, pull down for off
+	pinMode(SIM800LRST, INPUT_PULLUP); //sim800L reset switch
 
 	//digitalWrite(RELAY_1, LOW);
 	//digitalWrite(RELAY_2, LOW);
 	//delay(7000);
+	
+	digitalWrite(SIM800LRST, LOW);
+	delay(1000);
+	digitalWrite(SIM800LRST, HIGH);
 
 	Serial.begin(9600);
 	Serial.println("NodeMCU serial initialize");
@@ -108,20 +119,25 @@ void setup() {
 }
 
 void loop() {
-	//////////////////////////////////////////////////
-	while(sim800.available()){
-		Serial.print("Reading SIM800L :  ");
-		parseData(sim800.readString());
+	for (int tempTimer = 0;tempTimer <= 7;tempTimer++)  {
+		//////////////////////////////////////////////////
+		while(sim800.available()){
+			Serial.print("Reading SIM800L :  ");
+			parseData(sim800.readString());
+			delay(50);
+		}
+		//////////////////////////////////////////////////
+		while(Serial.available())  {
+			sim800.println(Serial.readString());
+			delay(50);
+		}
+		//////////////////////////////////////////////////
+		
+		swState1 = digitalRead(SENDSMSSW);
+		delay(50);
 	}
-	//////////////////////////////////////////////////
-	while(Serial.available())  {
-		sim800.println(Serial.readString());
-	}
-	//////////////////////////////////////////////////
-	
-	swState1 = digitalRead(SENDSMSSW);
-	delay(100);
 
+	Serial.println("Reading button :  ");
 	if (swState1 == LOW){
 		//get data from PHP for message to send
 		talkPHPget ();
