@@ -368,6 +368,7 @@ void talkPHPget (){
 		sendSMS();
 		blinkLED();
 		
+		delSMS();
 		delayer(3);
 	
 	}
@@ -384,14 +385,25 @@ void sendSMS(){
 	delay(100);
 	//sim800.println((char)26);// ASCII code of CTRL+Z
 	sim800.write(0x1A); //ascii code for ctrl-26 //sim800.println((char)26); //ascii code for ctrl-26
-	delay(1000);
+	delay(500);
+	
+	for (int tempTimer = 0;tempTimer <= 100;tempTimer++)  {
+		//////////////////////////////////////////////////
+		while(sim800.available()){
+			Serial.print("Reading SIM800L :  ");
+			parseData(sim800.readString());
+			delay(100);
+		}
+		delay(100);
+	}
+	
 	Serial.println("SMS Sent Successfully.");
 	
 	delayer(5);
 	
 	typePhp(1); //mark SMS as done
 	
-	delayer(30);
+	delayer(20);
 }
 
 void typePhp (int typer){
