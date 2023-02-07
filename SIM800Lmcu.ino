@@ -42,6 +42,7 @@ int swState1 = 1;
 
 const int led = 16;
 int ledStatus = 0;
+int smsSendStatus = 1;
 
 String smsStatus,senderNumber,receivedDate,msg;
 boolean isReply = false;
@@ -122,9 +123,9 @@ void loop() {
 	for (int tempTimer = 0;tempTimer <= 7;tempTimer++)  {
 		//////////////////////////////////////////////////
 		while(sim800.available()){
-			Serial.print("Reading SIM800L :  ");
+			Serial.print("Reading mSIM800L :  ");
 			parseData(sim800.readString());
-			delay(50);
+     	delay(50);
 		}
 		//////////////////////////////////////////////////
 		while(Serial.available())  {
@@ -136,12 +137,14 @@ void loop() {
 		swState1 = digitalRead(SENDSMSSW);
 		delay(50);
 	}
-
+	blinkLED();
 	Serial.println("Reading button :  ");
 	if (swState1 == LOW){
 		//get data from PHP for message to send
 		talkPHPget ();
 	}
+	
+	delayer(10);
 		
 } //main loop ends
 
@@ -157,12 +160,16 @@ void parseData(String buff){
 	buff.remove(0, index+2);
 	buff.trim();
 	//////////////////////////////////////////////////
-	  
+	  Serial.print("buffContents :  ");
+	  Serial.println(buff);
 	  //////////////////////////////////////////////////
 	if(buff != "OK"){
 		index = buff.indexOf(":");
 		String cmd = buff.substring(0, index);
 		cmd.trim();
+		
+		Serial.print("cmd :  ");
+		Serial.println(cmd);
 
 		buff.remove(0, index+2);
 
@@ -183,10 +190,17 @@ void parseData(String buff){
 				doAction();
 			}
 		}
+		
+		else if(cmd == "ERROR"){
+			Serial.println("ERROR! ");
+			typePhp(4); //mark SMS as failed
+			smsSendStatus = 0;
+		}
 		//////////////////////////////////////////////////
 	}
 	else{
 		//The result of AT Command is "OK"
+		Serial.println("The result of AT Command is OK");
 	}
 }
 
@@ -259,10 +273,10 @@ void Reply(String text){
 
 void delSMS(){
 	Serial.println();
-	sim800.print('AT+CMGDA="DEL READ"\r');
+	sim800.print('AT+CMGDA=\"DEL READ\"\r');
 	delayer(3);
 	Serial.println();
-	sim800.print('AT+CMGDA="DEL SENT"\r');
+	sim800.print('AT+CMGDA=\"DEL SENT\"\r');
 	delayer(3);
 	Serial.println("SMS deleted Successfully.");
 }
@@ -387,23 +401,56 @@ void sendSMS(){
 	sim800.write(0x1A); //ascii code for ctrl-26 //sim800.println((char)26); //ascii code for ctrl-26
 	delay(500);
 	
+	//try sending
 	for (int tempTimer = 0;tempTimer <= 100;tempTimer++)  {
 		//////////////////////////////////////////////////
 		while(sim800.available()){
-			Serial.print("Reading SIM800L :  ");
+			Serial.print("Reading 1SIM800L :  ");
 			parseData(sim800.readString());
 			delay(100);
 		}
 		delay(100);
 	}
 	
-	Serial.println("SMS Sent Successfully.");
+	delayer(10);
+	Serial.println();
 	
-	delayer(5);
+	//get sending results
+	for (int tempTimer = 0;tempTimer <= 100;tempTimer++)  {
+		//////////////////////////////////////////////////
+		while(sim800.available()){
+			Serial.print("Reading 2SIM800L :  ");
+			parseData(sim800.readString());
+			delay(100);
+		}
+		delay(100);
+	}
 	
-	typePhp(1); //mark SMS as done
+	delayer(10);
+	Serial.println();
 	
-	delayer(20);
+	//get sending results again
+	for (int tempTimer = 0;tempTimer <= 100;tempTimer++)  {
+		//////////////////////////////////////////////////
+		while(sim800.available()){
+			Serial.print("Reading 3SIM800L :  ");
+			parseData(sim800.readString());
+			delay(100);
+		}
+		delay(100);
+	}
+		
+	if (smsSendStatus == 1) {
+		Serial.println("SMS Sent Successfully.");
+		typePhp(1); //mark SMS as done
+	} 
+	else {
+		//failed SMS
+		Serial.println("SMS Sent Failed.");
+		smsSendStatus = 1;
+	}
+	
+	delayer(15);
 }
 
 void typePhp (int typer){
@@ -415,7 +462,7 @@ void typePhp (int typer){
 	String postData = "taskType=";
 	postData += typer;
 	
-	if ((typer==1)) {
+	if ((typer==1)||(typer==4)) {
 		Serial.println("Posting and updating data");
 		postData += "&val1=";
 		postData += taskID;
